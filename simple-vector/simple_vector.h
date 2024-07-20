@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cassert>
 #include <initializer_list>
 #include <stdexcept>
 
@@ -32,7 +34,7 @@ public:
 
     // Создаёт вектор из size элементов, инициализированных значением по умолчанию
     explicit SimpleVector(size_t size) : data_{size}, size_{size}, capacity_{size} {
-        std::fill(data_.Get(), data_.Get() + size_, Type{});
+        std::generate(data_.Get(), data_.Get() + size_, [] () {return Type{};});
     }
 
     explicit SimpleVector(const ReserveProxyObj& proxy_for_res)
@@ -58,7 +60,7 @@ public:
     // Оператор присваивания
     SimpleVector& operator=(const SimpleVector& rhs) {
         if (this != &rhs) {
-            if(size_ > rhs.size_ || capacity_ >= rhs.capacity_) {
+            if(rhs.size_ < capacity_) {
                 std::copy(rhs.data_.Get(), rhs.data_.Get() + rhs.size_, data_.Get());
                 size_ = rhs.size_;
                 return *this;
@@ -80,15 +82,9 @@ public:
     // Оператор присваивания перемещением
     SimpleVector& operator=(SimpleVector&& rhs) {
         if (this != &rhs) {
-            if(size_ > rhs.size_ || capacity_ >= rhs.capacity_) {
-                std::copy(std::make_move_iterator(rhs.data_.Get()), std::make_move_iterator(rhs.data_.Get() + rhs.size_), data_.Get());
-                size_ = std::exchange(rhs.size_,0);
-                return *this;
-            }
-
-            Realloc(rhs.capacity_);
-            std::copy(std::make_move_iterator(rhs.data_.Get()),std::make_move_iterator(rhs.data_.Get() + rhs.size_), data_.Get());
+            data_ = std::move(rhs.data_);
             size_ = std::exchange(rhs.size_,0);
+            capacity_ = std::exchange(rhs.capacity_, 0);
         }
         return *this;
     }
@@ -102,11 +98,13 @@ public:
             return;
         }
 
-        ArrayPtr<Type> tmp{Realloc(capacity_multiplier * capacity_)};
-        std::copy(tmp.Get(), tmp.Get() + size_, data_.Get());
+        ArrayPtr<Type> tmp{capacity_multiplier * capacity_};
+        std::copy(data_.Get(), data_.Get() + size_, tmp.Get());
+        data_.swap(tmp);
 
         data_[size_] = item;
         ++size_;
+        capacity_ = capacity_multiplier * capacity_;
     }
 
     // Перемещает элемент в конец вектора
@@ -129,6 +127,7 @@ public:
     // Если перед вставкой значения вектор был заполнен полностью,
     // вместимость вектора должна увеличиться, а для вектора вместимостью 0 стать равной 1
     Iterator Insert(ConstIterator pos, const Type& value) {
+        assert(pos >= begin() && pos <= end());
         size_t dist = static_cast<size_t>(pos - data_.Get());
 
         if(size_ < capacity_) {
@@ -152,6 +151,7 @@ public:
     // Если перед перемещением значения вектор был заполнен полностью,
     // вместимость вектора должна увеличиться, а для вектора вместимостью 0 стать равной 1
     Iterator Insert(ConstIterator pos, Type&& value) {
+        assert(pos >= begin() && pos <= end());
         size_t dist = static_cast<size_t>(pos - data_.Get());
 
         if(size_ < capacity_) {
@@ -172,20 +172,18 @@ public:
 
     // "Удаляет" последний элемент вектора. Вектор не должен быть пустым
     void PopBack() noexcept {
-        if( size_ > 0) {
-            --size_;
-        }
+        assert(size_ > 0);
+        --size_;
     }
 
     // Удаляет элемент вектора в указанной позиции
     Iterator Erase(ConstIterator pos) noexcept {
-        if( size_ > 0) {
-            ptrdiff_t dist = pos - data_.Get();
-            std::copy(std::make_move_iterator(data_.Get() + dist + 1), std::make_move_iterator(data_.Get() + size_), data_.Get() + dist);
-            --size_;
-            return data_.Get() + dist;
-        }
-        return data_.Get();
+        assert(pos >= begin() && pos < end());
+
+        ptrdiff_t dist = pos - data_.Get();
+        std::copy(std::make_move_iterator(data_.Get() + dist + 1), std::make_move_iterator(data_.Get() + size_), data_.Get() + dist);
+        --size_;
+        return data_.Get() + dist;
     }
 
     // Изменяет размер массива.
@@ -202,10 +200,11 @@ public:
             return;
         }
 
-        ArrayPtr<Type> tmp{Realloc(capacity_multiplier * new_size)};
-        std::copy(std::make_move_iterator(tmp.Get()), std::make_move_iterator(tmp.Get() + size_), data_.Get());
-        std::fill(data_.Get() + size_, data_.Get() + new_size, Type{});
+        ArrayPtr<Type> tmp{capacity_multiplier * new_size};
+        std::copy(data_.Get(), data_.Get() + size_, tmp.Get());
+        data_.swap(tmp);
         size_ = new_size;
+        capacity_ = capacity_multiplier * new_size;
     }
 
     // Резервирует заданный размер памяти
@@ -240,11 +239,13 @@ public:
 
     // Возвращает ссылку на элемент с индексом index
     Type& operator[](size_t index) noexcept {
+        assert(index < size_);
         return data_[index];
     }
 
     // Возвращает константную ссылку на элемент с индексом index
     const Type& operator[](size_t index) const noexcept {
+        assert(index < size_);
         return data_[index];
     }
 

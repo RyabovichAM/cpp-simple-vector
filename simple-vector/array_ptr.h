@@ -35,6 +35,7 @@ public:
     // Оператор присваивания перемещением
     ArrayPtr& operator=(ArrayPtr&& other) noexcept {
         if( this != &other) {
+            delete [] raw_ptr_;
             raw_ptr_ = std::exchange(other.raw_ptr_, nullptr);
         }
         return *this;
